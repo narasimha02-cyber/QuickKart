@@ -1,0 +1,102 @@
+from flask import Flask, render_template, request, redirect, session, url_for
+import sqlite3
+import random
+
+app = Flask(__name__)
+app.secret_key = 'quickkart_secret'
+
+# ------------------- Database Setup -------------------
+def init_db():
+    conn = sqlite3.connect('database/quickkart.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, mobile TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS cart (user_id INTEGER, product_id INTEGER, quantity INTEGER)''')
+    conn.commit()
+    conn.close()
+
+def insert_sample_products():
+    conn = sqlite3.connect('database/quickkart.db')
+    c = conn.cursor()
+    c.execute('SELECT COUNT(*) FROM products')
+    if c.fetchone()[0] == 0:
+        sample = [('Milk', 25), ('Bread', 30), ('Chips', 20), ('Juice', 50)]
+        c.executemany('INSERT INTO products (name, price) VALUES (?, ?)', sample)
+    conn.commit()
+    conn.close()
+
+# ------------------- Routes -------------------
+@app.route('/', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        mobile = request.form['mobile']
+        conn = sqlite3.connect('database/quickkart.db')
+        c = conn.cursor()
+        c.execute('INSERT INTO users (mobile) VALUES (?)', (mobile,))
+        conn.commit()
+        session['user_id'] = c.lastrowid
+        conn.close()
+        return redirect('/home')
+    return render_template('login.html')
+
+@app.route('/home')
+def home():
+    if 'user_id' not in session:
+        return redirect('/')
+    conn = sqlite3.connect('database/quickkart.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM products')
+    products = c.fetchall()
+    conn.close()
+    return render_template('home.html', products=products)
+
+@app.route('/add_to_cart/<int:product_id>')
+def add_to_cart(product_id):
+    user_id = session.get('user_id')
+    conn = sqlite3.connect('database/quickkart.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM cart WHERE user_id=? AND product_id=?', (user_id, product_id))
+    item = c.fetchone()
+    if item:
+        c.execute('UPDATE cart SET quantity = quantity + 1 WHERE user_id=? AND product_id=?', (user_id, product_id))
+    else:
+        c.execute('INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, 1)', (user_id, product_id))
+    conn.commit()
+    conn.close()
+    return redirect('/home')
+
+@app.route('/cart')
+def cart():
+    user_id = session.get('user_id')
+    conn = sqlite3.connect('database/quickkart.db')
+    c = conn.cursor()
+    c.execute('''SELECT products.name, products.price, cart.quantity 
+                 FROM cart 
+                 JOIN products ON cart.product_id = products.id 
+                 WHERE cart.user_id=?''', (user_id,))
+    items = c.fetchall()
+    total = sum(price * qty for (_, price, qty) in items)
+    conn.close()
+    return render_template('cart.html', items=items, total=total)
+
+@app.route('/payment')
+def payment():
+    return render_template('payment.html')
+
+@app.route('/confirm')
+def confirm():
+    delivery_partners = ['Ravi', 'Sneha', 'Karan', 'Meena', 'Ali']
+    assigned = random.choice(delivery_partners)
+    eta = random.randint(15, 45)
+    return render_template('delivery.html', partner=assigned, eta=eta)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/')
+
+# ------------------- Run -------------------
+if __name__ == '__main__':
+    init_db()
+    insert_sample_products()
+    app.run(debug=True)
